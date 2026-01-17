@@ -1,0 +1,102 @@
+name: ETL Pipeline CI/CD Optimized
+
+# Trigger workflow on push or pull request to master
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  etl:
+    name: Run ETL and Deploy
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: your-gold-bucket          # Replace with your S3 bucket name
+      LAMBDA_FUNCTION: your-lambda-name    # Replace with your Lambda function name
+
+    steps:
+      # -----------------------
+      # Checkout Code
+      # -----------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # -----------------------
+      # Setup Python
+      # -----------------------
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      # -----------------------
+      # Install Dependencies
+      # -----------------------
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # -----------------------
+      # Run Bronze Layer
+      # -----------------------
+      - name: Run Bronze Layer
+        run: python bronze.py
+
+      # -----------------------
+      # Run Silver Layer
+      # -----------------------
+      - name: Run Silver Layer
+        run: python silver.py
+
+      # -----------------------
+      # Run Gold Layer
+      # -----------------------
+      - name: Run Gold Layer
+        run: python gold.py
+
+      # -----------------------
+      # Upload Gold CSV to S3
+      # -----------------------
+      - name: Upload Gold CSV to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          echo "Uploading Gold CSV to S3..."
+          aws s3 rm s3://$S3_BUCKET/ --recursive
+          aws s3 cp data/gold/ s3://$S3_BUCKET/ --recursive
+          echo "✅ Upload complete"
+
+      # -----------------------
+      # Trigger Lambda Function
+      # -----------------------
+      - name: Trigger AWS Lambda
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          echo "Invoking Lambda function..."
+          aws lambda invoke \
+            --function-name $LAMBDA_FUNCTION \
+            --region $AWS_REGION \
+            --payload '{}' \
+            lambda_response.json
+          cat lambda_response.json
+          echo "✅ Lambda triggered"
+
+      # -----------------------
+      # Verify Upload (Optional)
+      # -----------------------
+      - name: Verify S3 Upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          echo "Files currently in S3 bucket:"
+          aws s3 ls s3://$S3_BUCKET/
